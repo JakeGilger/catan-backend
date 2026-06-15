@@ -12,6 +12,9 @@ A simple Go backend for playing Catan over the internet.
 - `POST /api/games/join` — join an existing game or create a new one
 - `GET /api/games/:gameId` — fetch game state
 - `POST /api/games/:gameId/save` — save/update game state
+- `POST /api/games/:gameId/start` — start the game (leader only)
+- `PUT /api/games/:gameId/leader` — assign leadership to another player (leader only)
+- `POST /api/games/:gameId/leave` — leave the lobby or game
 - `POST /api/games/:gameId/actions` — perform game actions that modify state
 
 WebSocket endpoint:
@@ -178,10 +181,63 @@ Response:
     "id": "game-id",
     "name": "Catan Game abc12345",
     "hostId": "user-id",
+    "leaderId": "leader-user-id",
+    "started": false,
     "state": { ... }
   }
 }
 ```
+
+The game begins in lobby mode with `started: false`. The creator is the initial leader, and leadership may be transferred before the game starts.
+
+### Start Game
+```
+POST /api/games/{gameId}/start
+Authorization: Bearer <token>
+
+Response:
+{
+  "game": {
+    "id": "game-id",
+    "started": true,
+    "leaderId": "leader-user-id",
+    "state": { ... }
+  }
+}
+```
+
+Only the current leader may start the game. Once started, new players cannot join.
+
+### Assign or Transfer Leadership
+```
+PUT /api/games/{gameId}/leader
+Authorization: Bearer <token>
+
+Request:
+{
+  "leaderId": "other-player-id"
+}
+
+Response:
+{
+  "game": { ... }
+}
+```
+
+Only the current leader may assign a new leader. If `leaderId` is omitted, leadership will default to another lobby player.
+
+### Leave Game / Lobby
+```
+POST /api/games/{gameId}/leave
+Authorization: Bearer <token>
+
+Response:
+{
+  "game": { ... }
+}
+```
+
+If the current leader leaves, leadership automatically transfers to the next available player in the lobby.
 
 ### Save Game State
 ```
@@ -242,7 +298,7 @@ Request payload:
 **Validation:**
 - Sufficient resources
 - Valid hex location
-- Minimum distance from other settlements (3+ hexes away)
+- Minimum distance from other settlements (2+ locations away)
 
 ### Build Road
 ```

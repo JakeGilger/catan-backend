@@ -62,8 +62,10 @@ type GameState struct {
 }
 
 type Game struct {
-    ID     string    `json:"id"`
-    Name   string    `json:"name"`
-    HostID string    `json:"hostId"`
-    State  GameState `json:"state"`
+    ID       string    `json:"id"`
+    Name     string    `json:"name"`
+    HostID   string    `json:"hostId"`
+    LeaderID string    `json:"leaderId,omitempty"`
+    Started  bool      `json:"started"`
+    State    GameState `json:"state"`
 }

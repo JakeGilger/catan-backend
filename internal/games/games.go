@@ -27,6 +27,10 @@ type ActionRequest struct {
     Payload    json.RawMessage `json:"payload,omitempty"`
 }
 
+type AssignLeaderRequest struct {
+    LeaderID string `json:"leaderId,omitempty"`
+}
+
 func JoinGameHandler(w http.ResponseWriter, r *http.Request, user model.User) {
     if r.Method != http.MethodPost {
         http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -46,9 +50,11 @@ func JoinGameHandler(w http.ResponseWriter, r *http.Request, user model.User) {
     game, ok := store.GetGame(req.GameID)
     if !ok {
         game = &model.Game{
-            ID:     util.GenerateID(),
-            Name:   fmt.Sprintf("Catan Game %s", util.GenerateID()[:8]),
-            HostID: user.ID,
+            ID:       util.GenerateID(),
+            Name:     fmt.Sprintf("Catan Game %s", util.GenerateID()[:8]),
+            HostID:   user.ID,
+            LeaderID: user.ID,
+            Started:  false,
             State: model.GameState{
                 Board:              rules.NewDefaultBoard(),
                 Players:            []model.User{},
@@ -61,11 +67,16 @@ func JoinGameHandler(w http.ResponseWriter, r *http.Request, user model.User) {
     }
 
     if !playerInGame(game, user.ID) {
+        if game.Started {
+            http.Error(w, "cannot join a game that has already started", http.StatusBadRequest)
+            return
+        }
         game.State.Players = append(game.State.Players, model.User{ID: user.ID, Username: req.PlayerName, Resources: map[string]int{}})
         game.State.Logs = append(game.State.Logs, fmt.Sprintf("%s joined the game", req.PlayerName))
         game.State.UpdatedAt = util.NowUnix()
     }
 
+    ensureLeader(game)
     store.SaveGame(game)
     util.WriteJSON(w, map[string]*model.Game{"game": game})
 }
@@ -104,6 +115,15 @@ func GamesHandler(w http.ResponseWriter, r *http.Request, user model.User) {
         case "actions":
             handleGameAction(w, r, game, user)
             return
+        case "start":
+            handleStartGame(w, r, game, user)
+            return
+        case "leader":
+            handleAssignLeader(w, r, game, user)
+            return
+        case "leave":
+            handleLeaveGame(w, r, game, user)
+            return
         }
     }
 
@@ -136,6 +156,108 @@ func handleSaveGame(w http.ResponseWriter, r *http.Request, game *model.Game) {
     game.State.UpdatedAt = util.NowUnix()
     store.SaveGame(game)
     // broadcast updated game state to WS subscribers
+    ws.BroadcastGame(game)
+    util.WriteJSON(w, map[string]*model.Game{"game": game})
+}
+
+func handleStartGame(w http.ResponseWriter, r *http.Request, game *model.Game, user model.User) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    if user.ID != game.LeaderID {
+        http.Error(w, "only the leader can start the game", http.StatusUnauthorized)
+        return
+    }
+    if game.Started {
+        http.Error(w, "game has already started", http.StatusBadRequest)
+        return
+    }
+
+    game.Started = true
+    game.State.Logs = append(game.State.Logs, fmt.Sprintf("%s started the game", user.Username))
+    game.State.UpdatedAt = util.NowUnix()
+    store.SaveGame(game)
+    ws.BroadcastGame(game)
+    util.WriteJSON(w, map[string]*model.Game{"game": game})
+}
+
+func handleAssignLeader(w http.ResponseWriter, r *http.Request, game *model.Game, user model.User) {
+    if r.Method != http.MethodPut {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    if user.ID != game.LeaderID {
+        http.Error(w, "only the leader can assign a new leader", http.StatusUnauthorized)
+        return
+    }
+
+    var req AssignLeaderRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "invalid request body", http.StatusBadRequest)
+        return
+    }
+
+    if req.LeaderID == "" {
+        if len(game.State.Players) <= 1 {
+            http.Error(w, "no other player available to assign leadership", http.StatusBadRequest)
+            return
+        }
+        for _, player := range game.State.Players {
+            if player.ID != user.ID {
+                req.LeaderID = player.ID
+                break
+            }
+        }
+    }
+
+    if req.LeaderID == user.ID {
+        util.WriteJSON(w, map[string]*model.Game{"game": game})
+        return
+    }
+
+    if !playerInGame(game, req.LeaderID) {
+        http.Error(w, "leader must be an existing player", http.StatusBadRequest)
+        return
+    }
+
+    game.LeaderID = req.LeaderID
+    leaderName := req.LeaderID
+    for _, player := range game.State.Players {
+        if player.ID == req.LeaderID {
+            leaderName = player.Username
+            break
+        }
+    }
+    game.State.Logs = append(game.State.Logs, fmt.Sprintf("%s is now the leader", leaderName))
+    game.State.UpdatedAt = util.NowUnix()
+    store.SaveGame(game)
+    ws.BroadcastGame(game)
+    util.WriteJSON(w, map[string]*model.Game{"game": game})
+}
+
+func handleLeaveGame(w http.ResponseWriter, r *http.Request, game *model.Game, user model.User) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+    if !playerInGame(game, user.ID) {
+        http.Error(w, "player not in game", http.StatusBadRequest)
+        return
+    }
+    idx := playerIndex(game, user.ID)
+    game.State.Players = append(game.State.Players[:idx], game.State.Players[idx+1:]...)
+    game.State.Logs = append(game.State.Logs, fmt.Sprintf("%s left the game", user.Username))
+    if user.ID == game.LeaderID {
+        if len(game.State.Players) > 0 {
+            game.LeaderID = game.State.Players[0].ID
+            game.State.Logs = append(game.State.Logs, fmt.Sprintf("%s is now the leader", game.State.Players[0].Username))
+        } else {
+            game.LeaderID = ""
+        }
+    }
+    game.State.UpdatedAt = util.NowUnix()
+    store.SaveGame(game)
     ws.BroadcastGame(game)
     util.WriteJSON(w, map[string]*model.Game{"game": game})
 }
@@ -215,6 +337,16 @@ func handleGameAction(w http.ResponseWriter, r *http.Request, game *model.Game, 
     // broadcast update for all connected websocket clients
     ws.BroadcastGame(game)
     util.WriteJSON(w, map[string]*model.Game{"game": game})
+}
+
+func ensureLeader(game *model.Game) {
+    if game.LeaderID != "" && playerInGame(game, game.LeaderID) {
+        return
+    }
+    if len(game.State.Players) > 0 {
+        game.LeaderID = game.State.Players[0].ID
+        game.State.Logs = append(game.State.Logs, fmt.Sprintf("%s is now the leader", game.State.Players[0].Username))
+    }
 }
 
 var settlementCost = map[string]int{
