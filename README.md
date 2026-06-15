@@ -18,6 +18,21 @@ Supported action types:
 
 Resource cost checks are enforced for built actions.
 
+WebSocket endpoint:
+- `GET /ws/games/{gameId}` — open a WebSocket connection (use `Authorization: Bearer <token>` header).
+	- The server will push JSON messages of the form `{ "game": { ... } }` whenever the game state changes.
+	- Example client (browser):
+
+```javascript
+const ws = new WebSocket('ws://localhost:4000/ws/games/your-game-id', {
+	headers: { Authorization: 'Bearer <token>' }
+});
+ws.onmessage = (ev) => {
+	const msg = JSON.parse(ev.data);
+	console.log('game update', msg.game);
+};
+```
+
 ## Run locally
 
 1. Start the server:

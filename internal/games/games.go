@@ -10,6 +10,7 @@ import (
     "catan-backend/internal/rules"
     "catan-backend/internal/store"
     "catan-backend/internal/util"
+    "catan-backend/internal/ws"
 )
 
 type JoinGameRequest struct {
@@ -134,6 +135,8 @@ func handleSaveGame(w http.ResponseWriter, r *http.Request, game *model.Game) {
     game.State = req.State
     game.State.UpdatedAt = util.NowUnix()
     store.SaveGame(game)
+    // broadcast updated game state to WS subscribers
+    ws.BroadcastGame(game)
     util.WriteJSON(w, map[string]*model.Game{"game": game})
 }
 
@@ -209,6 +212,8 @@ func handleGameAction(w http.ResponseWriter, r *http.Request, game *model.Game, 
 
     game.State.UpdatedAt = util.NowUnix()
     store.SaveGame(game)
+    // broadcast update for all connected websocket clients
+    ws.BroadcastGame(game)
     util.WriteJSON(w, map[string]*model.Game{"game": game})
 }
 
