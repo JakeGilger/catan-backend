@@ -22,6 +22,9 @@ func main() {
     mux.HandleFunc("/api/games/join", auth.AuthMiddleware(games.JoinGameHandler))
     mux.HandleFunc("/api/games", auth.AuthMiddleware(games.GamesHandler))
     mux.HandleFunc("/api/games/", auth.AuthMiddleware(games.GamesHandler))
+    mux.HandleFunc("/api/profile", auth.AuthMiddleware(auth.ProfileHandler))
+    mux.HandleFunc("/api/users", auth.UsersListHandler)
+    mux.HandleFunc("/api/users/", auth.PublicUserHandler)
 
     // WebSocket endpoint for game updates: /ws/games/{gameId}
     mux.HandleFunc("/ws/games/", func(w http.ResponseWriter, r *http.Request) {

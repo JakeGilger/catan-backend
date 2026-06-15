@@ -1,9 +1,21 @@
 package model
 
 type User struct {
-    ID        string         `json:"id"`
-    Username  string         `json:"username"`
-    Resources map[string]int `json:"resources"`
+    ID        string            `json:"id"`
+    Username  string            `json:"username"`
+    DisplayName string          `json:"displayName,omitempty"`
+    AvatarURL string            `json:"avatarUrl,omitempty"`
+    Bio       string            `json:"bio,omitempty"`
+    PublicProfile bool          `json:"publicProfile"`
+    Preferences map[string]string `json:"preferences,omitempty"`
+    Resources map[string]int    `json:"resources"`
+    Stats     PlayerStats       `json:"stats,omitempty"`
+}
+
+type PlayerStats struct {
+    Wins       int `json:"wins"`
+    Losses     int `json:"losses"`
+    GamesPlayed int `json:"gamesPlayed"`
 }
 
 type HexCoord struct {
